@@ -26,6 +26,7 @@ from contextlib import closing
 import time
 from ctpwrapper import ApiStructure
 from ctpwrapper import MdApiPy
+import sqlite3
 
 
 def check_address_port(tcp):
@@ -57,6 +58,9 @@ class Md(MdApiPy):
         self.investor_id = investor_id
         self.password = password
         self._request_id = request_id
+        self.conn = sqlite3.connect('futures_market_data.db',check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self.create_table()
 
     @property
     def request_id(self):
@@ -106,14 +110,15 @@ class Md(MdApiPy):
             print("RspUserLogin:", pRspUserLogin)
             self.login = True
 
-    def OnRtnDepthMarketData(self, pDepthMarketData):
-        """
-        行情订阅推送信息
-        :param pDepthMarketData:
-        :return:
-        """
-        print("OnRtnDepthMarketData")
-        print("DepthMarketData:", pDepthMarketData)
+    # def OnRtnDepthMarketData(self, pDepthMarketData):
+    #     """
+    #     行情订阅推送信息
+    #     :param pDepthMarketData:
+    #     :return:
+    #     """
+    #     print("OnRtnDepthMarketData")
+    #     print("DepthMarketData:", pDepthMarketData)
+        # self.save_to_database(pDepthMarketData)
 
     def OnRspSubMarketData(self, pSpecificInstrument, pRspInfo, nRequestID, bIsLast):
         """
@@ -145,6 +150,62 @@ class Md(MdApiPy):
         print("pRspInfo:", pRspInfo)
         print("pSpecificInstrument:", pSpecificInstrument)
 
+    def create_table(self):
+        # 创建表来存储期货行情数据
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS futures_market_data (
+                InstrumentID TEXT,
+                LastPrice REAL,
+                PreSettlementPrice REAL,
+                PreClosePrice REAL,
+                PreOpenInterest REAL,
+                OpenPrice REAL,
+                HighestPrice REAL,
+                LowestPrice REAL,
+                Volume INTEGER,
+                Turnover REAL,
+                OpenInterest REAL,
+                ClosePrice REAL,
+                SettlementPrice REAL,
+                UpperLimitPrice REAL,
+                LowerLimitPrice REAL,
+                UpdateTime TEXT,
+                UpdateMillisec INTEGER,
+                BidPrice1 REAL,
+                BidVolume1 INTEGER,
+                AskPrice1 REAL,
+                AskVolume1 INTEGER
+            )
+        ''')
+        self.conn.commit()
+
+    def save_to_database(self, data):
+        # 将行情数据保存到数据库
+        try:
+            self.cursor.execute('''
+                INSERT INTO futures_market_data (
+                    InstrumentID, LastPrice, PreSettlementPrice, PreClosePrice, PreOpenInterest,
+                    OpenPrice, HighestPrice, LowestPrice, Volume, Turnover,
+                    OpenInterest, ClosePrice, SettlementPrice, UpperLimitPrice, LowerLimitPrice,
+                    UpdateTime, UpdateMillisec, BidPrice1, BidVolume1, AskPrice1, AskVolume1
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                data.InstrumentID, data.LastPrice, data.PreSettlementPrice, data.PreClosePrice,
+                data.PreOpenInterest, data.OpenPrice, data.HighestPrice, data.LowestPrice,
+                data.Volume, data.Turnover, data.OpenInterest, data.ClosePrice,
+                data.SettlementPrice, data.UpperLimitPrice, data.LowerLimitPrice,
+                data.UpdateTime, data.UpdateMillisec, data.BidPrice1, data.BidVolume1,
+                data.AskPrice1, data.AskVolume1
+            ))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error saving data to database: {e}")
+
+    def OnRtnDepthMarketData(self, pDepthMarketData):
+        # 处理行情数据
+        print(f"收到行情数据: {pDepthMarketData.InstrumentID}")
+        self.save_to_database(pDepthMarketData)
+
 
 def main():
     json_file = open("config.json")
@@ -173,7 +234,7 @@ def main():
         if md.login:
             md.SubscribeMarketData(["FG505"])
             time.sleep(30)
-            md.UnSubscribeMarketData(["SR505"])
+            md.UnSubscribeMarketData(["FG505"])
             md.Join()
     else:
         print("md server is down")
